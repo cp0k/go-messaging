@@ -1,0 +1,55 @@
+version: '2'
+services:
+  present:
+    build:
+      context: .
+    image: "140am/go-messaging"
+    ports:
+      - "80:3999"
+    #volumes:
+      # uncomment for local editing of slides
+      #- ./go-messaging.slide:/go/present/go-messaging.slide
+      #- ./visual:/go/present/visual
+      #- ./code:/go/present/code
+
+  nats:
+    image: nats:1.4.0
+    ports:
+      - "4222:4222"
+      # https://nats.io/documentation/server/gnatsd-monitoring/
+      - "8222:8222"
+      # https://nats.io/documentation/server/gnatsd-cluster/
+      - "6222:6222"
+    command: -c gnatsd.conf -DV -m 8222 -cluster nats://0.0.0.0:5222
+
+  nats-2:
+    depends_on:
+      - "nats"
+    image: nats:1.4.0
+    command: -c gnatsd.conf -DV -m 8222 -cluster nats://0.0.0.0:5222 -routes nats://nats:5222
+
+  nats-3:
+    depends_on:
+      - "nats-2"
+    image: nats:1.4.0
+    command: -c gnatsd.conf -DV -m 8222 -cluster nats://0.0.0.0:5222 -routes nats://nats-2:5222
+
+  service-nats1:
+    build:
+      context: code/nats1
+    image: "140am/go-messaging-nats1"
+
+  service-nats2:
+    build:
+      context: code/nats1
+    image: "140am/go-messaging-nats1"
+
+  service-nats3:
+    build:
+      context: code/nats1
+    image: "140am/go-messaging-nats1"
+
+  service-nats-publisher-1:
+    build:
+      context: code/nats2
+    image: "140am/go-messaging-nats2"

@@ -1,0 +1,562 @@
+Go Messaging
+Communicating Between Services
+
+Go Miami - 2nd February 2019
+ 
+Manuel Kreutz
+140.am
+
+: problems: tight coupled services or complex designs - break apart services into *simple* solutions
+: problems: communicate across different languages / software stacks
+: goal: explore a few solutions since no single tool is great for all use cases
+
+* Agenda
+"Communicating Between Services" for distributed systems.
+
+: share lessens learned from running the mentioned systems for years in production
+: we will explore traditional client-service, broker and peer-to-peer solutions (http->nats->nsq->zeromq)
+: we will cover performance differences between the systems but not show or consider any benchmarks
+
+- Messaging 101
+- Building a distributed service in Go
+- Possible problems
+- Looking at a few existing solutions
+
+* Communicating via Messaging
+
+: network is inherently unreliable
+
+- Strong relationship between real-world and distributed software systems
+- Object method calls are a form of sending a message
+- Scaling new solutions requires service-oriented architecture
+
+* Messaging Pattern 101
+
+* Messaging Pattern :  Request/Reply
+
+- Send a request and wait for a response
+- Can also be implemented as *Publisher* and *Subscriber*
+- May result in the delivery of some messages more than once
+- *At-least-once* message delivery guarantee
+
+.image visual/request-reply.png
+
+* Messaging Pattern : Publisher
+
+: idea behind fanout / fire & forget
+
+- A *Publisher* sends a message without wanting anything in return
+- There are no guarantees that the message will get delivered
+- *At-most-once* message delivery guarantee
+
+.image visual/publish.png
+
+* Messaging Pattern : Subscriber
+
+- A *Subscriber* can receive messages without requesting them
+- May result in receiving some messages more than once
+- No real message delivery guarantee
+
+.image visual/subscribe.png
+
+* Message delivery guarantees
+
+* Message delivery guarantees
+
+Distributed applications can fail in multiple ways:
+
+- *Applications* can crash, freeze, run too slowly, run out of resources etc.
+- *System* services should be more reliable but can crash and run out of memory
+- *Networks* can fail or misbehave
+- *Hardware* can fail and affect systems in different ways
+- *Data-Centers* can go offline
+
+Each failure scenario has different constrains and costs:
+
+- What happens to a message after we handed it to the transport layer?
+- What after the service started processing it?
+- What after the service finished processing it?
+
+* Message delivery guarantees
+
+- At-Most-Once (publisher, subscribeer)
+- At-Least-Once (request/reply, publisher/subcribeer)
+- "Exactly-Once"
+
+* Message delivery guarantees - "Exactly-Once"
+
+: probably unnecessary, very complex and slow
+: "effectively-once"
+: retry failed and successfull events but discard already successfully processed ones
+: requires infrastructure / storage and has latency penalty on processing events
+: performance impact of failures are localized
+: rollback every point so effectively things never happened
+: very performant as just state along existing protocol but larger impact to performance in case of failures
+
+"Exactly-once" is often implemented as:
+
+- At-least-once event delivery + idempotent services
+- At-least-once event delivery + message deduplication
+- Using state checkpoints where the source can replay necessary events
+
+Systems who claim "exactly-once" usually refer updates committed to the state managed by those systems. That state is used to:
+
+- Hold the globally consistent state checkpoints
+- Store a transaction log of already fully processed events for every operator 
+
+* Building a simple distributed service in Go
+
+* Communicating with a service using Go channels
+
+Channels are a typed conduit through which you can send and receive values with the channel operator `<-`
+
+.play -edit code/channel1.go /^func main/,/^}/
+
+* Communicating with a service using Go channels over the Network
+
+- *netchan* was introduced pre Go 1.0 to implement type-safe networked channels
+- Allows to connect to a TCP endpoint and service name
+
+.code code/netchan.go  /^func server/,/^}/
+.caption netchan [[godoc.org/golang.org/x/exp/old/netchan]]
+
+* Communicating with a service using Go channels over the Network
+
+- *netchan* was introduced pre Go 1.0 to implement type-safe networked channels
+- Allows to connect to a TCP endpoint and service name
+- *Did*not*make*it*into*Go*1.0*
+
+* Communicating with a service - HTTP
+
+The Go standard library has *great* HTTP client and server support:
+
+.code code/http1.go
+
+We can then interact with that service over HTTP:
+
+  curl localhost:8080
+
+* Communicating with a service - HTTP
+
+- Networks are well designed to support HTTP (Firewalls, load balancers, encryption, authentication layers, compression,..)
+- Polling works well for cases where the exact interval of message availability is known
+- No bi-directional communication and requires new requests for each message
+
+* Communicating with a service - HTTP -> WebSocket
+
+: have only 4 different events (open, message, error, close)
+
+- WebSockets provide full-duplex, bidirectional connections between client and server
+- uses the HTTP Upgrade header to change from HTTP to WebSocket protocol
+
+.code code/websocket1.go /^func main/,/^}/
+
+* Communicating with a service - HTTP/2
+
+- HTTP/2 aims to reduce latency
+- Does *not*modify*the*application*semantics*of*HTTP*1.1* (methods, status codes, header fields, and URIs)
+- Introduces a new binary framing layer that is not backward compatible with the previous HTTP/1.x servers and clients
+: modifies how the data is formatted (framed) and transported between the client and server,
+- Full request and response multiplexing
+- [[https://http2.golang.org][http2.golang.org]]
+
+* Communicating with a service - HTTP/2 Example
+
+Servers can send responses to the client before being asked to:
+
+.code code/http2.go
+.caption "HTTP/2 Server Push" [[https://blog.golang.org/h2push][blog.golang.org/h2push]]
+
+* Communicating with a service - HTTP/2 + gRPC
+
+: wrapped for implementation consistency and performance
+: Works across languages and platforms
+: Simple service definition
+
+- Initially developed at Google
+- Open source remote procedure call (RPC) system
+- Takes advantage of feature sets of HTTP/2
+- Uses *Protocol*Buffers* as the interface description language
+
+*Multi-language,*multi-platform*framework*
+
+- Native in C, Java and GO
+- C stack is wrapped by C++, Python, Ruby, Objective-C, PHP, C#
+
+.caption [[https://grpc.io/docs/quickstart/go.html][grpc.io/docs/quickstart/go.html]]
+
+* Communicating with a service - Protocol Buffers
+
+*IDL*(interface*description*language)*
+Describe something once and generate interfaces for any language via code generation.
+
+*Data*Model*
+Structure of request and response.
+
+*Wire*Format*
+Binary format for network transmission.
+
+Google developed Protocol Buffers for use internally and has provided a code generator for multiple languages under an open source license.
+
+.caption [[https://developers.google.com/protocol-buffers/docs/gotutorial][developers.google.com/protocol-buffers/docs/gotutorial]]
+
+* Limits of our service so far
+
+* Limits of our service so far
+
+- Service endpoints are statically configured
+- Changes to infrastructure require re-configuration
+- Communication is difficult to monitor
+- Error recovery
+
+* Improving our Service
+
+: keeping the infrastructure that hosts your product or services as simple as possible.
+: Load-Balancing : round-robin becomes inefficient if tasks do not all roughly take the same time
+: Load-Balancing : post office analogy - people buying stampls (simple and fast) and others opening new accounts (slow)
+: Load-Balancing : solution for post office is to use single queue to get work from and distribute among counters
+
+- Service discovery
+- Decoupling of data producer and consumer
+- Control Plane (sending commands to active services and receive statuses back)
+- Load balancing
+- Fault tolerance
+- Scale Horizontally without much reconfiguration whenever we add a new piece
+- Scale application components independently
+- Asynchronous Communication
+- Roll out features or experiments more freely and faster
+- Operational simplicity
+
+* Let's explore a few messaging solutions
+
+* Let's explore a few messaging solutions
+
+- Focus on operational simplicity
+- Language agnostic or support many different programming languages
+- Open source
+
+* Messaging Solutions - NATS
+
+* NATS
+
+: developed by Apcera - used by telcos, siemens etc
+: Incubation-level project of the Cloud Native Computing Foundation (CNCF)
+
+- Designed for performance
+- Protects itself at all cost
+: disconnects slow consumers and lazy listenrs
+: clients have automatic failover and reconnect logic and buffer msgs temporary while segmented
+- Based on the concept of *Publisher* and *Subscriber*
+: messages composed of a target subject, an optional reply subject and an array of bytes.
+- Decouples publisher and subscriber through a *broker*
+- *Dynamic*interest*graph* based on existing publisher and subscriber
+: auto-prune subject does not exist until client subscribes to it and goes away after last subscribing client)
+: only messages intended for a process on another host go over the network
+- Simple text-based wire protocol
+- Transport layer agnostic
+- Official Docker image at 8 MB
+- Written in Go
+
+* NATS - Guarantees
+
+- *At-most-once*
+: attempts to deliver a copy of every message published to an subject to every subscriber of that subject or one random one when
+- *Source*ordered*delivery* when using a single publisher
+: messages from a single publisher will be delivered to all subscriber in order they were originally published
+: no order no guarantee when using multiple
+- *At-least-once* using *NATS*Streaming*Server*
+
+* NATS + Go
+
+Let's connect to NATS and send a "hello world" messages by creating a *Publisher*:
+
+.code code/nats2/main.go /^func main/,/^}/
+
+We can now containerize _this_code_ and run it as a standalone service:
+
+.code code/nats2/Dockerfile
+
+* NATS + Go
+
+To create a service which can act based on these events, we create a *Subscriber*:
+
+.play -edit code/nats_sub.go
+
+* NATS + Go
+
+We can combine *Subscriber* and *Publisher* to create a simple service worker:
+
+.code code/nats1/main.go /^func serviceWorker/,/^}/
+
+* NATS + Go - Using the Service Worker
+
+Using the service worker:
+
+.play -edit code/nats1.go /^func main/,/^}/
+
+This example will send a "help me" message to the "help" subscription topic allowing *Subscriber* of the "help" topic to receive the message.
+
+* NATS - Advanced
+
+* NATS - Load Balancing
+: By default every subscriber will receive the message
+
+Using a *Queue*Group*, only one *Subscriber* will be picked to receive the message:
+
+- selecting a random subscriber by default
+- NATS Streaming Server selects one with least amount of messages outstanding
+
+*Subscriber* with the same queue name will form a queue group:
+
+.code code/nats_queue.go
+
+This example will create a `job_workers` *Subscriber* *Queue*Group* for the "help" topic.
+
+* NATS - Clustering
+
+Connect 2+ servers for high volume messaging, resiliency and high availability.
+
+- Clients get notified if cluster topology changes
+- Clients connecting to any server in a cluster will remain connected to the cluster even if the server they initially connected to is taken down, as long as at least a single server remains in the cluster
+: no configuration changes / self healing
+: upgrading NATS makes use of that
+- Forward limit of one hop - Any server accepting a connection will inform other servers in the mesh about that new server so that they can connect to it
+- When a NATS server routes to a specified URL, it will advertise its cluster URL to all other servers effectively creating a routing mesh to all other servers
+
+: Their goal to allow bridge of clusters (billion of clients)
+
+* NATS - Clustering
+: seeding makes a full mesh cluster, or complete graph recommended but not required
+
+To create a cluster start the first instance with the cluster API:
+
+  -c gnatsd.conf -DV -m 8222 -cluster nats://0.0.0.0:5222
+
+All future nodes will use that seed node (or multiple) as starting point to join the cluster:
+
+  -c gnatsd.conf -DV -m 8222 -cluster nats://0.0.0.0:5222 -routes nats://nats:5222
+
+No need to connect each server to seed but simplifies deployment.
+
+* NATS - Security
+
+- TLS with CA Certificate Support
+- User, Token and TLS Certificate-based Authentication
+- Subject level permissions on a per User basis
+- Permission-based roles
+
+Example configuration:
+
+  REQUESTOR = {
+    publish = ["req.foo", "req.bar"]
+    subscribe = "_INBOX.>"
+  }
+  users = [
+    {user: alice,   password: bar,   permissions: $REQUESTOR}
+  ]
+
+* NATS - Streaming Server
+
+- Replay of events since last received, at specific sequence or time
+: time can be specific or relative (last hour) or last msg
+- Durable Subscriptions
+: pick up where left off
+: so that only messages since the last acknowledged message will be delivered to the client
+- Rate matching per Publisher and Subscriber (one can be slower than others)
+- Queue Group Support
+- Memory, File or Database Storage
+- High Availability setup through fault tolerant or clustered configuration
+: sits on top of NATS streaming as client
+- Scale through partitioning
+
+* NSQ
+
+* NSQ - Overview
+
+- Support *distributed*topologies* with no SPoF
+- *Horizontally*scalable* (no brokers, seamlessly add more nodes to the cluster)
+- Primarily in-memory (buffers messages to disk after reaching limit)
+- HTTP interface
+- Transport layer agnostic
+- Written in Go
+
+* NSQ - Guarantees
+
+- *At-Least-Once*
+- Messages received are unordered
+- Messages are not durable (by default)
+- Consumers eventually find all topic producers
+
+* NSQ
+Instead of a central _broker_, *nsqd* instances are co-located with services producing messages and *Subscribers* consume messages directly from all *Publisher*:
+
+.image visual/nsq1.png
+
+Data can be ingested to *nsqd* using a HTTP or TCP API:
+
+  curl -d 'Hello Go Miami!' 'http://localhost:4151/put?topic=test'
+
+* NSQ
+
+: similar/same as queue-group of nats previously described
+
+*Subscriber* subscribe to _Topics_ and _Channels_ allow load-balancing of messages:
+
+.image visual/nsq2.gif
+
+* NSQ - lookupd
+
+- `nsqlookupd` is a daemon that manages topology information for discovery
+- Clients query `nsqlookupd` to discover `nsqd` producers for a specific topic
+- `nsqd` nodes broadcast topic and channel information to `nsqlookupd`
+
+.image visual/nsq3.png 400 _
+
+* NSQ - Web Interface
+
+Web UI to view aggregated stats in realtime and perform various administrative tasks.
+
+.image visual/nsqadmin1.png _ 950
+
+* NSQ - Web Interface
+
+: interesting to note the difference in buffers in geo zones due to latency (10.0 vs 10.1)
+
+Allows to troubleshoot and monitor subscribers on a given channel topic.
+
+.image visual/nsqadmin2.png _ 950
+
+This shows a subscriber has fallen behind and instances buffering messages to disk.
+
+* NSQ - Tooling
+
+- Displays aggregate stats for a specific topic/channel
+- Write messages from a topic to disk, optionally rolling and/or compressing the file
+- Call HTTP endpoints based on messages
+- Re-publish messages
+
+* ZeroMQ
+
+* ØMQ - Overview
+
+- Socket abstraction
+- Create a new socket flow for each type of problem you need to solve
+- Low-level C API. High-level bindings exist in 40+ languages including Python, Java, PHP, Ruby, C, C++, C#, Erlang, Perl
+- Carries messages across inproc, IPC, TCP, TIPC, multicast
+: Inproc only works in same context but fastest way to connect threads i one process
+: IPC uses unix inter-process communication like domain sockets, MQ or whatever is available
+: Created in 2007 by iMatix
+: iMatix and JP Morgan Chasee were the original designer of Advanced Message Queuing Protocol 1.0
+
+* ØMQ - Guarantees
+
+- Message are delivered atomically intact and ordered
+: You won't get part of a multipart message, ever
+- Does not guarantee delivery
+
+* ØMQ - Sockets
+
+Basic concepts previously covered as socket types:
+
+- Publisher
+- Subscriber
+- Request
+- Reply
+
+* ØMQ - Advanced Socket Types
+
+- *Push* load-balances messages to all connected peers
+- *Pull* fair-queues messages from all connected peers
+- *Dealer* combines *Push* and *Pull* socket features (allows for asynchronous use)
+- *Router* prepends received messages with a reply address and when sending uses that reply address to decide which peer the message should go to
+
+* ØMQ - Communication Patterns
+
+.link http://zguide.zeromq.org/ zguide.zeromq.org
+
+.image visual/zmq_fig8.png
+
+* ØMQ - Communication Patterns - Request-Reply
+
+.image visual/zmq_fig2.png
+.caption [[http://zguide.zeromq.org/page:all#Ask-and-Ye-Shall-Receive][zguide.zeromq.org/page:all#Ask-and-Ye-Shall-Receive]]
+
+* ØMQ - Communication Patterns - Publish-Subscribe
+
+.image visual/zmq_fig4.png
+.caption [[http://zguide.zeromq.org/page:all#Getting-the-Message-Out][zguide.zeromq.org/page:all#Getting-the-Message-Out]]
+
+* ØMQ - Communication Patterns - Parallel Pipeline
+
+.image visual/zmq_fig5.png
+.caption [[http://zguide.zeromq.org/page:all#Divide-and-Conquer][zguide.zeromq.org/page:all#Divide-and-Conquer]]
+
+* ØMQ - Communication Patterns - Parallel Pipeline with Kill Signaling
+
+.image visual/zmq_fig19.png 500 _
+.caption [[http://zguide.zeromq.org/page:all#Handling-Errors-and-ETERM][zguide.zeromq.org/page:all#Handling-Errors-and-ETERM]]
+
+* ØMQ - Communication Patterns - Faire Queuing
+
+.image visual/zmq_fig6.png
+.caption [[http://zguide.zeromq.org/page:all#Divide-and-Conquer][zguide.zeromq.org/page:all#Divide-and-Conquer]]
+
+* ØMQ - Communication Patterns - Lazy Pirate Pattern
+
+.image visual/zmq_fig47.png
+.caption [[http://zguide.zeromq.org/page:all#Client-Side-Reliability-Lazy-Pirate-Pattern][zguide.zeromq.org/page:all#Client-Side-Reliability-Lazy-Pirate-Pattern]]
+
+* ØMQ - Communication Patterns - Paranoid Pirate Pattern
+
+.image visual/zmq_fig49.png
+.caption [[http://zguide.zeromq.org/page:all#Robust-Reliable-Queuing-Paranoid-Pirate-Pattern][zguide.zeromq.org/page:all#Robust-Reliable-Queuing-Paranoid-Pirate-Pattern]]
+
+* ØMQ - Communication Patterns - Titanic Pattern
+
+.image visual/zmq_fig51.png
+.caption [[http://zguide.zeromq.org/page:all#Disconnected-Reliability-Titanic-Pattern][zguide.zeromq.org/page:all#Disconnected-Reliability-Titanic-Pattern]]
+
+* ØMQ - Recap
+
+* Not covered this time
+
+- RabbitMQ (AMQP)
+- Redis PUB/SUB
+- Apache Kafka
+- Apache ActiveMQ (Amazon MQ)
+- Apache Flink
+- Nanomsg (NNG)
+: nanomsg started by one of C authors
+: used C instead of C++ as core
+
+* Final Recap
+
+* Things to consider when building distributed services
+
+- Idempotent services over exactly-once requirements
+- Replayable Messages over Guaranteed Delivery
+- Commutative over ordered
+
+Example of idempotent services:
+
+- Compute a reply based on the state provided by the request
+- Name service resolution
+- HTTP methods: GET, HEAD, PUT, DELETE ("safe" are only GET, HEAD)
+- Produce the same result when called over and over
+
+Non-idempotent use cases:
+
+- Logging
+- Services that modify shared data
+
+* Use Cases
+
+- Service discovery
+- Decoupling of data producer and consumer (services)
+- Control Plane (sending commands to active services and receive statuses back)
+- Load balancing
+- Scale Horizontally without much reconfiguration whenever we add a new piece
+- Fault tolerance
+- Scale application components independently
+- Asynchronous Communication
+- Work with multiple programming languages
