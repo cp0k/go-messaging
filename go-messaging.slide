@@ -10,6 +10,14 @@ Manuel Kreutz
 : problems: communicate across different languages / software stacks
 : goal: explore a few solutions since no single tool is great for all use cases
 
+* Communicating Between Services via Messaging
+
+: network is inherently unreliable
+
+- Strong relationship between real-world and distributed software systems
+- Object method calls are a form of sending a message
+- Scaling new solutions requires service-oriented architecture
+
 * Agenda
 "Communicating Between Services" for distributed systems.
 
@@ -21,14 +29,6 @@ Manuel Kreutz
 - Building a distributed service in Go
 - Possible problems
 - Looking at a few existing solutions
-
-* Communicating via Messaging
-
-: network is inherently unreliable
-
-- Strong relationship between real-world and distributed software systems
-- Object method calls are a form of sending a message
-- Scaling new solutions requires service-oriented architecture
 
 * Messaging Pattern 101
 
