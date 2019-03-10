@@ -533,9 +533,9 @@ Basic concepts previously covered as socket types:
 
 * Things to consider when building distributed services
 
-- Idempotent services over exactly-once requirements
 - Replayable Messages over Guaranteed Delivery
-- Commutative over ordered
+- Commutative over Ordered
+- Idempotent Services over Exactly-Once Requirements
 
 Example of idempotent services:
 
