@@ -12,7 +12,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	msg, err := nc.Request("help", []byte("help me"), 100*time.Millisecond) // HL
+	msg, err := nc.Request("help", []byte("help me"), 1000*time.Millisecond) // HL
 	if err != nil {
 		log.Fatal(err)
 	}
